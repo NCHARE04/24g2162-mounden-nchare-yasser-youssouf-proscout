@@ -1,0 +1,981 @@
+"""
+ProScout 24G2162 — Plateforme de mise en relation Joueurs/Clubs de football.
+
+Application de collecte et d'analyse descriptive des données.
+TP INF232 EC2 — Développée par MOUNDEN NCHARE YASSER YOUSSOUF (Matricule : 24G2162).
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
+# ---------------------------------------------------------------------------
+# Identité de l'auteur (apparaît partout, y compris dans le titre du navigateur)
+# ---------------------------------------------------------------------------
+AUTHOR_NAME = "MOUNDEN NCHARE YASSER YOUSSOUF"
+AUTHOR_MATRICULE = "24G2162"
+APP_TITLE = f"ProScout {AUTHOR_MATRICULE} — {AUTHOR_NAME}"
+
+st.set_page_config(
+    page_title=APP_TITLE,
+    page_icon="⚽",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ---------------------------------------------------------------------------
+# Chemins de stockage des données collectées (persistance en CSV)
+# ---------------------------------------------------------------------------
+BASE_DIR = Path(__file__).parent
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(exist_ok=True)
+
+PLAYERS_FILE = DATA_DIR / "players.csv"
+CLUBS_FILE = DATA_DIR / "clubs.csv"
+
+POSITIONS = [
+    "Gardien",
+    "Défenseur central",
+    "Latéral droit",
+    "Latéral gauche",
+    "Milieu défensif",
+    "Milieu central",
+    "Milieu offensif",
+    "Ailier droit",
+    "Ailier gauche",
+    "Attaquant",
+]
+
+PIEDS = ["Droit", "Gauche", "Ambidextre"]
+
+NIVEAUX = ["Amateur", "Semi-pro", "Professionnel", "Académie/Centre de formation"]
+
+PAYS = [
+    "Cameroun",
+    "Sénégal",
+    "Côte d'Ivoire",
+    "Nigeria",
+    "Ghana",
+    "Maroc",
+    "Algérie",
+    "Tunisie",
+    "France",
+    "Belgique",
+    "Espagne",
+    "Portugal",
+    "Italie",
+    "Allemagne",
+    "Angleterre",
+    "Pays-Bas",
+    "Brésil",
+    "Argentine",
+    "Autre",
+]
+
+PLAYERS_COLUMNS = [
+    "id",
+    "nom",
+    "prenom",
+    "age",
+    "pays",
+    "ville",
+    "position",
+    "pied_fort",
+    "taille_cm",
+    "poids_kg",
+    "niveau",
+    "club_actuel",
+    "experience_annees",
+    "buts_saison",
+    "passes_saison",
+    "email",
+    "telephone",
+    "video_url",
+    "biographie",
+    "date_inscription",
+]
+
+CLUBS_COLUMNS = [
+    "id",
+    "nom_club",
+    "pays",
+    "ville",
+    "division",
+    "position_recherchee",
+    "age_min",
+    "age_max",
+    "pied_prefere",
+    "niveau_min",
+    "taille_min_cm",
+    "budget_max_eur",
+    "contact_email",
+    "description_offre",
+    "date_publication",
+]
+
+
+# ---------------------------------------------------------------------------
+# Persistance — chargement / sauvegarde robustes
+# ---------------------------------------------------------------------------
+def _ensure_csv(path: Path, columns: list[str]) -> None:
+    if not path.exists():
+        pd.DataFrame(columns=columns).to_csv(path, index=False)
+
+
+def load_players() -> pd.DataFrame:
+    _ensure_csv(PLAYERS_FILE, PLAYERS_COLUMNS)
+    df = pd.read_csv(PLAYERS_FILE)
+    for col in PLAYERS_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
+    return df[PLAYERS_COLUMNS]
+
+
+def load_clubs() -> pd.DataFrame:
+    _ensure_csv(CLUBS_FILE, CLUBS_COLUMNS)
+    df = pd.read_csv(CLUBS_FILE)
+    for col in CLUBS_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
+    return df[CLUBS_COLUMNS]
+
+
+def save_player(record: dict) -> None:
+    df = load_players()
+    record["id"] = int(df["id"].max() + 1) if len(df) and pd.notna(df["id"].max()) else 1
+    record["date_inscription"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    df = pd.concat([df, pd.DataFrame([record])[PLAYERS_COLUMNS]], ignore_index=True)
+    df.to_csv(PLAYERS_FILE, index=False)
+
+
+def save_club(record: dict) -> None:
+    df = load_clubs()
+    record["id"] = int(df["id"].max() + 1) if len(df) and pd.notna(df["id"].max()) else 1
+    record["date_publication"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    df = pd.concat([df, pd.DataFrame([record])[CLUBS_COLUMNS]], ignore_index=True)
+    df.to_csv(CLUBS_FILE, index=False)
+
+
+# ---------------------------------------------------------------------------
+# Données de démonstration — pour rendre l'app utilisable dès le 1er lancement
+# ---------------------------------------------------------------------------
+def seed_demo_data_if_empty() -> None:
+    clubs = load_clubs()
+    if clubs.empty:
+        demo_clubs = [
+            {
+                "nom_club": "FC Étoile de Yaoundé",
+                "pays": "Cameroun",
+                "ville": "Yaoundé",
+                "division": "Élite One",
+                "position_recherchee": "Attaquant",
+                "age_min": 18,
+                "age_max": 25,
+                "pied_prefere": "Droit",
+                "niveau_min": "Semi-pro",
+                "taille_min_cm": 175,
+                "budget_max_eur": 50000,
+                "contact_email": "recrutement@etoile-yaounde.cm",
+                "description_offre": "Cherchons buteur rapide pour la saison.",
+            },
+            {
+                "nom_club": "AS Dakar United",
+                "pays": "Sénégal",
+                "ville": "Dakar",
+                "division": "Ligue 1 SN",
+                "position_recherchee": "Milieu central",
+                "age_min": 19,
+                "age_max": 28,
+                "pied_prefere": "Ambidextre",
+                "niveau_min": "Professionnel",
+                "taille_min_cm": 178,
+                "budget_max_eur": 120000,
+                "contact_email": "scouting@dakarunited.sn",
+                "description_offre": "Milieu box-to-box avec vision de jeu.",
+            },
+            {
+                "nom_club": "Olympique Casablanca",
+                "pays": "Maroc",
+                "ville": "Casablanca",
+                "division": "Botola Pro",
+                "position_recherchee": "Défenseur central",
+                "age_min": 20,
+                "age_max": 30,
+                "pied_prefere": "Droit",
+                "niveau_min": "Professionnel",
+                "taille_min_cm": 185,
+                "budget_max_eur": 200000,
+                "contact_email": "ocasa@recrut.ma",
+                "description_offre": "Défenseur dominant dans le jeu aérien.",
+            },
+            {
+                "nom_club": "Stade Abidjanais",
+                "pays": "Côte d'Ivoire",
+                "ville": "Abidjan",
+                "division": "Ligue 1 CIV",
+                "position_recherchee": "Ailier gauche",
+                "age_min": 17,
+                "age_max": 24,
+                "pied_prefere": "Droit",
+                "niveau_min": "Académie/Centre de formation",
+                "taille_min_cm": 170,
+                "budget_max_eur": 35000,
+                "contact_email": "stade@abidjan.ci",
+                "description_offre": "Ailier rapide, dribble court, bonne finition.",
+            },
+            {
+                "nom_club": "Racing Lille Métropole",
+                "pays": "France",
+                "ville": "Lille",
+                "division": "National 2",
+                "position_recherchee": "Gardien",
+                "age_min": 18,
+                "age_max": 26,
+                "pied_prefere": "Droit",
+                "niveau_min": "Semi-pro",
+                "taille_min_cm": 188,
+                "budget_max_eur": 25000,
+                "contact_email": "recrutement@racing-lille.fr",
+                "description_offre": "Gardien moderne, bon jeu au pied.",
+            },
+            {
+                "nom_club": "Atlético Porto Júnior",
+                "pays": "Portugal",
+                "ville": "Porto",
+                "division": "Liga 3",
+                "position_recherchee": "Milieu offensif",
+                "age_min": 17,
+                "age_max": 22,
+                "pied_prefere": "Gauche",
+                "niveau_min": "Académie/Centre de formation",
+                "taille_min_cm": 172,
+                "budget_max_eur": 80000,
+                "contact_email": "talents@atletico-porto.pt",
+                "description_offre": "Numéro 10 créatif pour notre académie.",
+            },
+            {
+                "nom_club": "Tunis Sporting Club",
+                "pays": "Tunisie",
+                "ville": "Tunis",
+                "division": "Ligue Pro 1",
+                "position_recherchee": "Latéral droit",
+                "age_min": 19,
+                "age_max": 27,
+                "pied_prefere": "Droit",
+                "niveau_min": "Professionnel",
+                "taille_min_cm": 175,
+                "budget_max_eur": 90000,
+                "contact_email": "tsc@recrut.tn",
+                "description_offre": "Latéral offensif avec endurance.",
+            },
+            {
+                "nom_club": "Bayern Brüssel",
+                "pays": "Belgique",
+                "ville": "Bruxelles",
+                "division": "Challenger Pro League",
+                "position_recherchee": "Attaquant",
+                "age_min": 20,
+                "age_max": 29,
+                "pied_prefere": "Gauche",
+                "niveau_min": "Professionnel",
+                "taille_min_cm": 180,
+                "budget_max_eur": 150000,
+                "contact_email": "scouts@bayernbxl.be",
+                "description_offre": "Avant-centre dos au but, bon dans la surface.",
+            },
+        ]
+        for c in demo_clubs:
+            save_club(c)
+
+
+# ---------------------------------------------------------------------------
+# Algorithme de matching joueur ↔ clubs
+# ---------------------------------------------------------------------------
+NIVEAU_RANK = {n: i for i, n in enumerate(NIVEAUX)}
+
+
+def compute_match_score(player: pd.Series, club: pd.Series) -> tuple[int, list[str]]:
+    """Retourne un score sur 100 et la liste des critères validés/échoués."""
+    score = 0
+    reasons: list[str] = []
+
+    # Position (40 points — critère le plus important)
+    if str(player["position"]).strip() == str(club["position_recherchee"]).strip():
+        score += 40
+        reasons.append(f"✅ Position parfaite : {player['position']}")
+    else:
+        reasons.append(
+            f"❌ Position : recherche {club['position_recherchee']}, vous êtes {player['position']}"
+        )
+
+    # Âge (20 points)
+    try:
+        age = int(player["age"])
+        if int(club["age_min"]) <= age <= int(club["age_max"]):
+            score += 20
+            reasons.append(f"✅ Âge dans la fourchette ({club['age_min']}-{club['age_max']} ans)")
+        else:
+            reasons.append(
+                f"❌ Âge : {age} ans, recherche {club['age_min']}-{club['age_max']} ans"
+            )
+    except (ValueError, TypeError):
+        reasons.append("⚠️ Âge non renseigné")
+
+    # Pied fort (15 points)
+    pref = str(club["pied_prefere"]).strip()
+    if pref == "Ambidextre" or pref == str(player["pied_fort"]).strip():
+        score += 15
+        reasons.append(f"✅ Pied fort compatible ({player['pied_fort']})")
+    else:
+        reasons.append(f"❌ Pied : recherche {pref}, vous êtes {player['pied_fort']}")
+
+    # Niveau (15 points)
+    try:
+        if NIVEAU_RANK.get(str(player["niveau"]), -1) >= NIVEAU_RANK.get(
+            str(club["niveau_min"]), 0
+        ):
+            score += 15
+            reasons.append(f"✅ Niveau suffisant (vous : {player['niveau']})")
+        else:
+            reasons.append(
+                f"❌ Niveau : minimum requis {club['niveau_min']}, vous êtes {player['niveau']}"
+            )
+    except Exception:
+        reasons.append("⚠️ Niveau non comparable")
+
+    # Taille (10 points)
+    try:
+        if float(player["taille_cm"]) >= float(club["taille_min_cm"]):
+            score += 10
+            reasons.append(f"✅ Taille suffisante ({int(player['taille_cm'])} cm)")
+        else:
+            reasons.append(
+                f"❌ Taille : minimum {int(club['taille_min_cm'])} cm, vous mesurez "
+                f"{int(player['taille_cm'])} cm"
+            )
+    except (ValueError, TypeError):
+        reasons.append("⚠️ Taille non renseignée")
+
+    return score, reasons
+
+
+# ---------------------------------------------------------------------------
+# Sidebar — navigation et signature
+# ---------------------------------------------------------------------------
+def render_sidebar() -> str:
+    with st.sidebar:
+        st.markdown(f"## ⚽ ProScout {AUTHOR_MATRICULE}")
+        st.caption("Mise en relation Joueurs / Clubs")
+        st.divider()
+
+        page = st.radio(
+            "Navigation",
+            [
+                "🏠 Accueil",
+                "⚽ Inscription Joueur",
+                "🏟️ Espace Club",
+                "🔍 Trouver mon Club",
+                "📊 Analyse descriptive",
+                "🗂️ Données collectées",
+                "ℹ️ À propos",
+            ],
+            label_visibility="collapsed",
+        )
+
+        st.divider()
+        st.markdown("**Réalisé par**")
+        st.markdown(f"👤 {AUTHOR_NAME}")
+        st.markdown(f"🆔 Matricule : **{AUTHOR_MATRICULE}**")
+        st.caption("TP INF232 EC2 — 2026")
+
+    return page
+
+
+# ---------------------------------------------------------------------------
+# Page : Accueil
+# ---------------------------------------------------------------------------
+def page_home() -> None:
+    st.title(f"⚽ ProScout {AUTHOR_MATRICULE}")
+    st.subheader("La plateforme qui connecte les joueurs aux clubs qui les cherchent")
+
+    players = load_players()
+    clubs = load_clubs()
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Joueurs inscrits", len(players))
+    col2.metric("Clubs recruteurs", len(clubs))
+    col3.metric(
+        "Pays représentés (joueurs)",
+        int(players["pays"].nunique()) if len(players) else 0,
+    )
+    col4.metric(
+        "Postes recherchés",
+        int(clubs["position_recherchee"].nunique()) if len(clubs) else 0,
+    )
+
+    st.divider()
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### 🎯 Comment ça marche ?")
+        st.markdown(
+            """
+            1. **Joueur** : crée ton profil sportif (position, niveau, statistiques).
+            2. **Club** : publie une offre de recrutement avec tes critères.
+            3. **Matching** : l'algorithme calcule un score de compatibilité.
+            4. **Contact** : récupère l'email du club et envoie ta candidature.
+            """
+        )
+
+    with c2:
+        st.markdown("### 📈 Que collecte l'application ?")
+        st.markdown(
+            """
+            - Profils sportifs détaillés des joueurs.
+            - Offres de recrutement des clubs.
+            - Statistiques en temps réel (positions, niveaux, pays).
+            - Analyses descriptives (graphiques interactifs).
+            """
+        )
+
+    st.divider()
+    st.info(
+        f"Application développée par **{AUTHOR_NAME}** — Matricule **{AUTHOR_MATRICULE}** "
+        f"dans le cadre du TP INF232 EC2."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Page : Inscription Joueur
+# ---------------------------------------------------------------------------
+def page_player_registration() -> None:
+    st.title("⚽ Inscription Joueur")
+    st.caption("Crée ton profil pour être visible des clubs recruteurs.")
+
+    with st.form("player_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            nom = st.text_input("Nom *")
+            prenom = st.text_input("Prénom *")
+            age = st.number_input("Âge *", min_value=12, max_value=50, value=20)
+            pays = st.selectbox("Pays *", PAYS)
+            ville = st.text_input("Ville")
+            email = st.text_input("Email *")
+            telephone = st.text_input("Téléphone")
+        with c2:
+            position = st.selectbox("Poste principal *", POSITIONS)
+            pied_fort = st.selectbox("Pied fort *", PIEDS)
+            taille_cm = st.number_input("Taille (cm) *", min_value=140, max_value=220, value=175)
+            poids_kg = st.number_input("Poids (kg)", min_value=40, max_value=120, value=70)
+            niveau = st.selectbox("Niveau actuel *", NIVEAUX)
+            club_actuel = st.text_input("Club actuel (laisse vide si libre)")
+            experience_annees = st.number_input(
+                "Années d'expérience en compétition", min_value=0, max_value=30, value=2
+            )
+
+        st.markdown("**Statistiques de la dernière saison**")
+        c3, c4 = st.columns(2)
+        with c3:
+            buts_saison = st.number_input("Buts marqués", min_value=0, max_value=200, value=0)
+        with c4:
+            passes_saison = st.number_input(
+                "Passes décisives", min_value=0, max_value=200, value=0
+            )
+
+        video_url = st.text_input("Lien vidéo (YouTube, Veo, etc.)")
+        biographie = st.text_area(
+            "Quelques mots sur toi (qualités, ambitions)", height=100
+        )
+
+        submitted = st.form_submit_button("✅ Enregistrer mon profil", use_container_width=True)
+
+        if submitted:
+            errors = []
+            if not nom.strip():
+                errors.append("Le nom est obligatoire.")
+            if not prenom.strip():
+                errors.append("Le prénom est obligatoire.")
+            if not email.strip() or "@" not in email:
+                errors.append("Email invalide.")
+
+            if errors:
+                for e in errors:
+                    st.error(e)
+            else:
+                save_player(
+                    {
+                        "nom": nom.strip(),
+                        "prenom": prenom.strip(),
+                        "age": int(age),
+                        "pays": pays,
+                        "ville": ville.strip(),
+                        "position": position,
+                        "pied_fort": pied_fort,
+                        "taille_cm": int(taille_cm),
+                        "poids_kg": int(poids_kg),
+                        "niveau": niveau,
+                        "club_actuel": club_actuel.strip(),
+                        "experience_annees": int(experience_annees),
+                        "buts_saison": int(buts_saison),
+                        "passes_saison": int(passes_saison),
+                        "email": email.strip(),
+                        "telephone": telephone.strip(),
+                        "video_url": video_url.strip(),
+                        "biographie": biographie.strip(),
+                    }
+                )
+                st.success(
+                    f"Bienvenue {prenom} {nom} ! Ton profil est enregistré. "
+                    "Va dans **🔍 Trouver mon Club** pour voir les clubs qui correspondent."
+                )
+                st.balloons()
+
+
+# ---------------------------------------------------------------------------
+# Page : Espace Club
+# ---------------------------------------------------------------------------
+def page_club_space() -> None:
+    st.title("🏟️ Espace Club — Publier une offre de recrutement")
+    st.caption("Décris le profil de joueur recherché par ton club.")
+
+    with st.form("club_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            nom_club = st.text_input("Nom du club *")
+            pays = st.selectbox("Pays du club *", PAYS)
+            ville = st.text_input("Ville")
+            division = st.text_input("Division / Championnat")
+            contact_email = st.text_input("Email de contact recrutement *")
+        with c2:
+            position_recherchee = st.selectbox("Poste recherché *", POSITIONS)
+            c2a, c2b = st.columns(2)
+            with c2a:
+                age_min = st.number_input(
+                    "Âge minimum", min_value=12, max_value=50, value=18
+                )
+            with c2b:
+                age_max = st.number_input(
+                    "Âge maximum", min_value=12, max_value=50, value=28
+                )
+            pied_prefere = st.selectbox("Pied préféré", PIEDS)
+            niveau_min = st.selectbox("Niveau minimum requis", NIVEAUX)
+            taille_min_cm = st.number_input(
+                "Taille minimum (cm)", min_value=150, max_value=210, value=175
+            )
+            budget_max_eur = st.number_input(
+                "Budget transfert maximum (EUR)", min_value=0, max_value=50_000_000, value=50_000
+            )
+
+        description_offre = st.text_area(
+            "Description de l'offre", height=100, placeholder="Profil recherché, conditions…"
+        )
+
+        submitted = st.form_submit_button("📢 Publier l'offre", use_container_width=True)
+
+        if submitted:
+            errors = []
+            if not nom_club.strip():
+                errors.append("Le nom du club est obligatoire.")
+            if not contact_email.strip() or "@" not in contact_email:
+                errors.append("Email de contact invalide.")
+            if age_min > age_max:
+                errors.append("L'âge minimum doit être inférieur à l'âge maximum.")
+
+            if errors:
+                for e in errors:
+                    st.error(e)
+            else:
+                save_club(
+                    {
+                        "nom_club": nom_club.strip(),
+                        "pays": pays,
+                        "ville": ville.strip(),
+                        "division": division.strip(),
+                        "position_recherchee": position_recherchee,
+                        "age_min": int(age_min),
+                        "age_max": int(age_max),
+                        "pied_prefere": pied_prefere,
+                        "niveau_min": niveau_min,
+                        "taille_min_cm": int(taille_min_cm),
+                        "budget_max_eur": int(budget_max_eur),
+                        "contact_email": contact_email.strip(),
+                        "description_offre": description_offre.strip(),
+                    }
+                )
+                st.success(f"Offre du club « {nom_club} » publiée avec succès.")
+                st.balloons()
+
+
+# ---------------------------------------------------------------------------
+# Page : Trouver mon Club (matching)
+# ---------------------------------------------------------------------------
+def page_find_clubs() -> None:
+    st.title("🔍 Trouver les clubs qui te recherchent")
+    players = load_players()
+    clubs = load_clubs()
+
+    if players.empty:
+        st.warning(
+            "Aucun joueur n'est encore inscrit. Va d'abord sur **⚽ Inscription Joueur**."
+        )
+        return
+    if clubs.empty:
+        st.warning("Aucun club n'a publié d'offre pour le moment.")
+        return
+
+    options = {
+        f"{row['prenom']} {row['nom']} — {row['position']} ({row['pays']})": row["id"]
+        for _, row in players.iterrows()
+    }
+    label = st.selectbox("Sélectionne ton profil", list(options.keys()))
+    player = players[players["id"] == options[label]].iloc[0]
+
+    st.markdown("### 👤 Ton profil")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Position", player["position"])
+    c2.metric("Âge", int(player["age"]))
+    c3.metric("Niveau", player["niveau"])
+    c4.metric("Pied fort", player["pied_fort"])
+
+    st.divider()
+
+    min_score = st.slider(
+        "Score de compatibilité minimum (%)", min_value=0, max_value=100, value=50, step=5
+    )
+
+    results = []
+    for _, club in clubs.iterrows():
+        score, reasons = compute_match_score(player, club)
+        results.append((score, club, reasons))
+    results.sort(key=lambda x: x[0], reverse=True)
+
+    visible = [r for r in results if r[0] >= min_score]
+    st.markdown(f"### 🎯 {len(visible)} club(s) correspondant(s) à ton profil")
+
+    if not visible:
+        st.info("Aucun club ne correspond avec ce seuil. Essaie de baisser le score minimum.")
+        return
+
+    for score, club, reasons in visible:
+        with st.container(border=True):
+            head1, head2, head3 = st.columns([3, 2, 1])
+            with head1:
+                st.markdown(f"#### 🏟️ {club['nom_club']}")
+                st.caption(
+                    f"{club['ville']}, {club['pays']} — {club['division']} | "
+                    f"Recherche : **{club['position_recherchee']}**"
+                )
+            with head2:
+                st.markdown(f"**📧 {club['contact_email']}**")
+                st.caption(f"Budget max : {int(club['budget_max_eur']):,} €".replace(",", " "))
+            with head3:
+                color = "🟢" if score >= 75 else ("🟡" if score >= 50 else "🔴")
+                st.metric("Score", f"{score}/100", delta=color)
+
+            st.write(club["description_offre"])
+            with st.expander("Détail du matching"):
+                for r in reasons:
+                    st.write(r)
+
+
+# ---------------------------------------------------------------------------
+# Page : Analyse descriptive
+# ---------------------------------------------------------------------------
+def page_analytics() -> None:
+    st.title("📊 Analyse descriptive des données collectées")
+    players = load_players()
+    clubs = load_clubs()
+
+    tab1, tab2, tab3 = st.tabs(["⚽ Joueurs", "🏟️ Clubs", "🔗 Marché global"])
+
+    # --- Joueurs --------------------------------------------------------------
+    with tab1:
+        if players.empty:
+            st.info("Aucun joueur inscrit pour le moment.")
+        else:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total joueurs", len(players))
+            c2.metric("Âge moyen", f"{players['age'].astype(float).mean():.1f} ans")
+            c3.metric("Taille moyenne", f"{players['taille_cm'].astype(float).mean():.0f} cm")
+            c4.metric("Buts/joueur (saison)", f"{players['buts_saison'].astype(float).mean():.1f}")
+
+            st.divider()
+
+            cA, cB = st.columns(2)
+            with cA:
+                pos_counts = players["position"].value_counts().reset_index()
+                pos_counts.columns = ["Position", "Nombre"]
+                fig = px.bar(
+                    pos_counts,
+                    x="Position",
+                    y="Nombre",
+                    title="Répartition des joueurs par position",
+                    color="Nombre",
+                    color_continuous_scale="Blues",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            with cB:
+                niv_counts = players["niveau"].value_counts().reset_index()
+                niv_counts.columns = ["Niveau", "Nombre"]
+                fig = px.pie(
+                    niv_counts,
+                    names="Niveau",
+                    values="Nombre",
+                    title="Répartition par niveau",
+                    hole=0.4,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            cC, cD = st.columns(2)
+            with cC:
+                fig = px.histogram(
+                    players,
+                    x="age",
+                    nbins=15,
+                    title="Distribution des âges",
+                    color_discrete_sequence=["#0EA5E9"],
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            with cD:
+                pays_counts = players["pays"].value_counts().reset_index()
+                pays_counts.columns = ["Pays", "Joueurs"]
+                fig = px.bar(
+                    pays_counts.head(10),
+                    x="Joueurs",
+                    y="Pays",
+                    orientation="h",
+                    title="Top pays d'origine des joueurs",
+                    color="Joueurs",
+                    color_continuous_scale="Teal",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("#### 📐 Statistiques descriptives (variables numériques)")
+            num_cols = ["age", "taille_cm", "poids_kg", "experience_annees", "buts_saison", "passes_saison"]
+            st.dataframe(
+                players[num_cols].astype(float).describe().round(2),
+                use_container_width=True,
+            )
+
+    # --- Clubs ----------------------------------------------------------------
+    with tab2:
+        if clubs.empty:
+            st.info("Aucun club n'a publié d'offre.")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total offres", len(clubs))
+            c2.metric(
+                "Budget moyen (€)",
+                f"{clubs['budget_max_eur'].astype(float).mean():,.0f}".replace(",", " "),
+            )
+            c3.metric("Pays différents", int(clubs["pays"].nunique()))
+
+            st.divider()
+
+            cA, cB = st.columns(2)
+            with cA:
+                pos_counts = clubs["position_recherchee"].value_counts().reset_index()
+                pos_counts.columns = ["Position", "Offres"]
+                fig = px.bar(
+                    pos_counts,
+                    x="Position",
+                    y="Offres",
+                    title="Postes les plus recherchés par les clubs",
+                    color="Offres",
+                    color_continuous_scale="Reds",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            with cB:
+                pays_counts = clubs["pays"].value_counts().reset_index()
+                pays_counts.columns = ["Pays", "Clubs"]
+                fig = px.pie(
+                    pays_counts,
+                    names="Pays",
+                    values="Clubs",
+                    title="Répartition géographique des clubs",
+                    hole=0.4,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            fig = px.box(
+                clubs,
+                x="position_recherchee",
+                y="budget_max_eur",
+                title="Budget de transfert maximum par poste recherché",
+                color="position_recherchee",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # --- Marché global --------------------------------------------------------
+    with tab3:
+        if players.empty or clubs.empty:
+            st.info("Il faut au moins 1 joueur et 1 club pour analyser le marché.")
+            return
+
+        offre = players["position"].value_counts().rename("Offre (joueurs)")
+        demande = clubs["position_recherchee"].value_counts().rename("Demande (clubs)")
+        marche = pd.concat([offre, demande], axis=1).fillna(0).reset_index()
+        marche.columns = ["Position", "Offre (joueurs)", "Demande (clubs)"]
+        marche["Tension du marché"] = (
+            marche["Demande (clubs)"] / marche["Offre (joueurs)"].replace(0, np.nan)
+        ).round(2)
+
+        fig = px.bar(
+            marche.melt(
+                id_vars="Position",
+                value_vars=["Offre (joueurs)", "Demande (clubs)"],
+                var_name="Type",
+                value_name="Nombre",
+            ),
+            x="Position",
+            y="Nombre",
+            color="Type",
+            barmode="group",
+            title="Offre (joueurs disponibles) vs Demande (clubs recruteurs) par poste",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### 📋 Tension du marché par poste")
+        st.caption(
+            "Tension > 1 ⇒ plus de clubs cherchent que de joueurs disponibles "
+            "(opportunité pour les joueurs)."
+        )
+        st.dataframe(marche, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
+# Page : Données brutes
+# ---------------------------------------------------------------------------
+def page_data_browser() -> None:
+    st.title("🗂️ Données collectées")
+
+    tab1, tab2 = st.tabs(["⚽ Joueurs", "🏟️ Clubs"])
+
+    with tab1:
+        df = load_players()
+        st.write(f"**{len(df)}** joueur(s) inscrit(s).")
+        if not df.empty:
+            with st.expander("🔎 Filtres"):
+                fc1, fc2, fc3 = st.columns(3)
+                with fc1:
+                    f_pos = st.multiselect("Position", sorted(df["position"].dropna().unique()))
+                with fc2:
+                    f_pays = st.multiselect("Pays", sorted(df["pays"].dropna().unique()))
+                with fc3:
+                    f_niv = st.multiselect("Niveau", sorted(df["niveau"].dropna().unique()))
+
+            filtered = df.copy()
+            if f_pos:
+                filtered = filtered[filtered["position"].isin(f_pos)]
+            if f_pays:
+                filtered = filtered[filtered["pays"].isin(f_pays)]
+            if f_niv:
+                filtered = filtered[filtered["niveau"].isin(f_niv)]
+
+            st.dataframe(filtered, use_container_width=True, hide_index=True)
+            st.download_button(
+                "⬇️ Télécharger les joueurs (CSV)",
+                filtered.to_csv(index=False).encode("utf-8"),
+                file_name="joueurs.csv",
+                mime="text/csv",
+            )
+
+    with tab2:
+        df = load_clubs()
+        st.write(f"**{len(df)}** offre(s) de club(s).")
+        if not df.empty:
+            with st.expander("🔎 Filtres"):
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    f_pos = st.multiselect(
+                        "Position recherchée",
+                        sorted(df["position_recherchee"].dropna().unique()),
+                        key="club_pos",
+                    )
+                with fc2:
+                    f_pays = st.multiselect(
+                        "Pays", sorted(df["pays"].dropna().unique()), key="club_pays"
+                    )
+            filtered = df.copy()
+            if f_pos:
+                filtered = filtered[filtered["position_recherchee"].isin(f_pos)]
+            if f_pays:
+                filtered = filtered[filtered["pays"].isin(f_pays)]
+            st.dataframe(filtered, use_container_width=True, hide_index=True)
+            st.download_button(
+                "⬇️ Télécharger les clubs (CSV)",
+                filtered.to_csv(index=False).encode("utf-8"),
+                file_name="clubs.csv",
+                mime="text/csv",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Page : À propos
+# ---------------------------------------------------------------------------
+def page_about() -> None:
+    st.title("ℹ️ À propos de cette application")
+    st.markdown(
+        f"""
+        ### ProScout {AUTHOR_MATRICULE}
+
+        Application développée dans le cadre du **TP INF232 EC2** :
+        développer une application de **collecte et d'analyse descriptive des données** en ligne.
+
+        - **Étudiant** : {AUTHOR_NAME}
+        - **Matricule** : `{AUTHOR_MATRICULE}`
+        - **Secteur** : Football — mise en relation Joueurs/Clubs
+        - **Stack technique** : Python · Streamlit · Pandas · Plotly · NumPy
+
+        ### Qualités de l'application
+
+        | Critère       | Mise en œuvre |
+        |---------------|---------------|
+        | **Créativité** | Plateforme de scouting football avec algorithme de matching multi-critères |
+        | **Robustesse** | Persistance CSV, validation des formulaires, gestion des données manquantes |
+        | **Efficacité** | Navigation par onglets, filtres dynamiques, graphiques interactifs |
+        | **Précision**  | Analyse descriptive complète : stats, distributions, tensions du marché |
+
+        ### Fonctionnalités
+
+        1. Collecte de profils joueurs (20 variables sportives et personnelles).
+        2. Publication d'offres de recrutement par les clubs.
+        3. Algorithme de matching scoré (position, âge, pied, niveau, taille).
+        4. Tableaux de bord descriptifs interactifs (Plotly).
+        5. Export CSV des données collectées.
+        """
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routage principal
+# ---------------------------------------------------------------------------
+def main() -> None:
+    seed_demo_data_if_empty()
+    page = render_sidebar()
+
+    if page.startswith("🏠"):
+        page_home()
+    elif page.startswith("⚽"):
+        page_player_registration()
+    elif page.startswith("🏟️"):
+        page_club_space()
+    elif page.startswith("🔍"):
+        page_find_clubs()
+    elif page.startswith("📊"):
+        page_analytics()
+    elif page.startswith("🗂️"):
+        page_data_browser()
+    elif page.startswith("ℹ️"):
+        page_about()
+
+
+if __name__ == "__main__":
+    main()
